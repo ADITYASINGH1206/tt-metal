@@ -4,6 +4,7 @@
 import pytest
 import torch
 from helpers.chip_architecture import ChipArchitecture
+from helpers.constraints import skip_if_32bit_input_without_dest_acc
 from helpers.format_config import DataFormat, InputOutputFormat
 from helpers.golden_generators import (
     ELEMENTS_PER_TILE,
@@ -305,10 +306,7 @@ def test_sfpu_reduce(
     if reduce_pool in [ReducePool.Average, ReducePool.Min] and TestConfig.WITH_COVERAGE:
         pytest.skip(reason="https://github.com/tenstorrent/tt-llk/issues/1040")
 
-    if formats.input_format.is_32_bit() and dest_acc == DestAccumulation.No:
-        pytest.skip(
-            reason="32-bit formats require DestAccumulation.Yes (HW cannot unpack into SrcA/SrcB)"
-        )
+    skip_if_32bit_input_without_dest_acc(formats, dest_acc)
 
     if (
         mathop == MathOperation.ReduceRow

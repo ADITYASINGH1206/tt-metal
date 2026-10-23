@@ -3137,7 +3137,7 @@ Selu:
 SfpuAddTopRow:
   - {out: Float32, max_ulp: 0, measured: 0, sampled: 2026-09-18}  # 0 ULP, 1 variant / 2048 lanes -- the whole sweep, 2026-09-18
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuAddcdiv:
   - {out: Float32, max_ulp: 1600, measured: 1280, sampled: 2026-09-18}  # max 1280 ULP, 2 variants / 8192 lanes, 2026-09-18
   - {out: Float16_b, max_ulp: 1, measured: 1, sampled: 2026-09-18}  # max 1 ULP, 4 variants / 16384 lanes, 2026-09-18
@@ -3221,7 +3221,7 @@ SfpuBinaryMax:
   - {in: Float16_b, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float16_b, out: Float32, dest: "No", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float16_b, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
   - {in: Float32, out: Bfp8_b, dest: "Yes", metric: tolerance, measured: 17, sampled: 2026-09-21}  # block-quantized, so tolerance
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 1, measured: 1, sampled: 2026-09-21}  # budget kept at the 1 the same measurement carried before
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 1, measured: 0, sampled: 2026-09-21}  # floored to 1 (a finite sample cannot assert exactness)
@@ -3250,7 +3250,7 @@ SfpuBinaryMin:
   - {in: Float16_b, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float16_b, out: Float32, dest: "No", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float16_b, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
   - {in: Float32, out: Bfp8_b, dest: "Yes", metric: tolerance, measured: 17, sampled: 2026-09-21}  # block-quantized, so tolerance
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 1, measured: 1, sampled: 2026-09-21}  # budget kept at the 1 the same measurement carried before
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 1, measured: 0, sampled: 2026-09-21}  # floored to 1 (a finite sample cannot assert exactness)
@@ -3300,7 +3300,7 @@ SfpuElwEq:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuElwGe:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {out: Float32, max_ulp: 0, measured: 0, sampled: 2026-09-18}
   - {out: Float16_b, max_ulp: 0, measured: 0, sampled: 2026-09-18}
@@ -3319,7 +3319,7 @@ SfpuElwGe:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuElwGt:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {out: Float32, max_ulp: 0, measured: 0, sampled: 2026-09-18}
   - {out: Float16_b, max_ulp: 0, measured: 0, sampled: 2026-09-18}
@@ -3338,7 +3338,7 @@ SfpuElwGt:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuElwLe:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {out: Float32, max_ulp: 0, measured: 0, sampled: 2026-09-18}
   - {out: Float16_b, max_ulp: 0, measured: 0, sampled: 2026-09-18}
@@ -3357,7 +3357,7 @@ SfpuElwLe:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuElwLt:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {out: Float32, max_ulp: 0, measured: 0, sampled: 2026-09-18}
   - {out: Float16_b, max_ulp: 0, measured: 0, sampled: 2026-09-18}
@@ -3376,7 +3376,7 @@ SfpuElwLt:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuElwNe:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {out: Float32, max_ulp: 0, measured: 0, sampled: 2026-09-18}
   - {out: Float16_b, max_ulp: 0, measured: 0, sampled: 2026-09-18}
@@ -3395,7 +3395,7 @@ SfpuElwNe:  # 0 ULP, 147k-246k lanes across the six, 2026-09-18
   - {in: Float32, out: Float16, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 
 # add/sub/rsub are single IEEE operations: one step on bf16 and fp16, and the Float32 65536
 # is the usual output-rounding figure. sub/rsub's fp16 cells read 140 steps when ranked
@@ -3545,7 +3545,7 @@ SfpuIsclose:
   - {in: Float16_b, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuLerp:
   - {out: Float32, max_ulp: 3840, measured: 3072, sampled: 2026-09-18}  # max 3072 ULP, 2 variants / 8192 lanes, 2026-09-18
   - {out: Float16_b, max_ulp: 1, measured: 1, sampled: 2026-09-18}  # max 1 ULP, 4 variants / 16384 lanes, 2026-09-18
@@ -3570,7 +3570,7 @@ SfpuMask:
   - {in: Float16_b, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
   - {in: Float32, out: Float16_b, dest: "Yes", max_ulp: 1, measured: 0, sampled: 2026-09-21}  # floored to 1 (a finite sample cannot assert exactness)
   - {in: Float32, out: Float32, dest: "Yes", max_ulp: 0, measured: 0, sampled: 2026-09-21}
-  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (fp32_no_dest_acc_skip_reason), so no run backs the {out: ...} wildcards there
+  - {in: Float32, dest: "No", metric: tolerance}  # not measured: every binary driver skips a 32-bit input at dest_acc=No (skip_reason_32bit_input_without_dest_acc), so no run backs the {out: ...} wildcards there
 SfpuSnakeBeta:
   - {out: Float32, max_ulp: 5, measured: 4, sampled: 2026-09-18}  # max 4 ULP, 2 variants / 8192 lanes, 2026-09-18
   - {out: Float16_b, max_ulp: 1, measured: 1, sampled: 2026-09-18}  # max 1 ULP, 4 variants / 16384 lanes, 2026-09-18
