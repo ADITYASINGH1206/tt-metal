@@ -1470,6 +1470,59 @@ inline void fused_step_group(const bool ascending)
 //
 // Entry/exit invariant: Fp32_enabled = 1 (needed for 32-bit Dst reads).
 
+// Transpose the 16x16 face RWC.Dst currently points at, then step RWC.Dst on by one face so the next replay
+// lands on the next one. Dst addressing sums the instruction immediate, RWC.Dst and
+// DEST_TARGET_REG_CFG_MATH_Offset, so keeping the face in RWC.Dst leaves the immediates identical for every
+// face and lets one recording serve all eight -- and leaves the MATH offset, which the sort owns, untouched.
+// Exactly transpose_face_body_len Tensix instructions; see the assert below.
+inline void transpose_dest_face_32b_body()
+{
+    // Transpose low 16 bits and backup it in SrcA
+    cfg_reg_rmw_tensix<ALU_FORMAT_SPEC_REG0_SrcA_RMW>(to_underlying(DataFormat::Float16_b));
+    TTI_MOVD2B(1, 16, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 0);
+    TTI_MOVD2B(1, 20, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 4);
+    TTI_MOVD2B(1, 24, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 8);
+    TTI_MOVD2B(1, 28, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 12);
+
+    TTI_TRNSPSRCB;
+
+    TTI_MOVB2A(0, ADDR_MOD_7, p_movb2a::MOV_4_ROWS, 16);
+    TTI_MOVB2A(4, ADDR_MOD_7, p_movb2a::MOV_4_ROWS, 20);
+    TTI_MOVB2A(8, ADDR_MOD_7, p_movb2a::MOV_4_ROWS, 24);
+    TTI_MOVB2A(12, ADDR_MOD_7, p_movb2a::MOV_4_ROWS, 28);
+
+    // --- Pass 1: hi16 ---
+    cfg_reg_rmw_tensix<ALU_FORMAT_SPEC_REG0_SrcA_RMW>(to_underlying(DataFormat::Tf32));
+
+    TTI_MOVD2B(0, 16, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 0);
+    TTI_MOVD2B(0, 20, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 4);
+    TTI_MOVD2B(0, 24, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 8);
+    TTI_MOVD2B(0, 28, ADDR_MOD_7, p_movd2b::MOV_4_ROWS, 12);
+
+    TTI_TRNSPSRCB;
+
+    TTI_MOVB2D(0, 16, ADDR_MOD_7, p_movb2d::MOV_4_ROWS, 0);
+    TTI_MOVB2D(0, 20, ADDR_MOD_7, p_movb2d::MOV_4_ROWS, 4);
+    TTI_MOVB2D(0, 24, ADDR_MOD_7, p_movb2d::MOV_4_ROWS, 8);
+    TTI_MOVB2D(0, 28, ADDR_MOD_7, p_movb2d::MOV_4_ROWS, 12);
+
+    // lo16 writeback: Fp32_enabled=0 + SrcA=Float32 -> writes lo16, preserves hi16
+    cfg_reg_rmw_tensix<ALU_ACC_CTRL_Fp32_enabled_RMW>(0);
+    cfg_reg_rmw_tensix<ALU_FORMAT_SPEC_REG0_SrcA_RMW>(to_underlying(DataFormat::Float32));
+
+    TTI_MOVA2D(1, 0, ADDR_MOD_7, p_mova2d::MOV_8_ROWS, 0);
+    TTI_MOVA2D(1, 8, ADDR_MOD_5, p_mova2d::MOV_8_ROWS, 8); // ADDR_MOD_5 = dest +16: step to the next face
+
+    // Restore Fp32_enabled=1 for subsequent 32-bit Dst access
+    cfg_reg_rmw_tensix<ALU_ACC_CTRL_Fp32_enabled_RMW>(1);
+}
+
+// 5 x RMWCIB (both CFG fields are single-byte masks, so one instruction each) + 8 x MOVD2B + 2 x TRNSPSRCB
+// + 4 x MOVB2A + 4 x MOVB2D + 2 x MOVA2D.
+constexpr std::uint32_t transpose_face_body_len = 25;
+
+// The absolute-offset form, still used by the unfused index faces and by transpose_N_faces, where the face
+// count varies and the recording would not pay for itself.
 // Transpose one 16x16 face of 32-bit Dst data at `dst_offset`.
 template <int dst_offset>
 inline void transpose_dest_face_32b()
@@ -1514,6 +1567,18 @@ inline void transpose_dest_face_32b()
     cfg_reg_rmw_tensix<ALU_ACC_CTRL_Fp32_enabled_RMW>(1);
 }
 
+// Transpose `N` consecutive faces starting at the current RWC.Dst, recording the body once and replaying it.
+template <std::uint32_t N>
+inline void transpose_faces_from_dst()
+{
+    lltt::record<lltt::Exec>(0, transpose_face_body_len);
+    transpose_dest_face_32b_body();
+    for (std::uint32_t face = 1; face < N; face++)
+    {
+        lltt::replay(0, transpose_face_body_len);
+    }
+}
+
 // `enter_transpose_cfg_block` / `leave_transpose_cfg_block` wrap a group of
 // `transpose_8_faces` calls in a single CFG mode switch. Both `transpose_*`
 // helpers need:
@@ -1556,15 +1621,11 @@ inline void transpose_8_faces()
         enter_transpose_cfg_block();
     }
 
-    // 8 value faces at +0, +16, ..., +112.
-    transpose_dest_face_32b<0>();
-    transpose_dest_face_32b<16>();
-    transpose_dest_face_32b<32>();
-    transpose_dest_face_32b<48>();
-    transpose_dest_face_32b<64>();
-    transpose_dest_face_32b<80>();
-    transpose_dest_face_32b<96>();
-    transpose_dest_face_32b<112>();
+    // 8 value faces at +0, +16, ..., +112, walked through RWC.Dst from one recording. The callers reach here
+    // with RWC.Dst == 0; make that explicit rather than implicit, since a stale Dst corrupts silently.
+    TTI_SETRWC(p_setrwc::CLR_NONE, 0, 0, 0, 0, p_setrwc::SET_D);
+    transpose_faces_from_dst<8>();
+    TTI_SETRWC(p_setrwc::CLR_NONE, 0, 0, 0, 0, p_setrwc::SET_D);
     if constexpr (!fused)
     {
         // Unfused mode keeps the indices in a parallel DST region. Transpose
