@@ -284,46 +284,57 @@ FORCE_INLINE void reduce_split_row(
 // its merge with the segment.
 template <uint32_t K>
 FORCE_INLINE void reduce_split_segmented_row(
-    CircularBuffer& input, uint32_t acc_cb, uint32_t indices_cb, uint32_t num_chunks, uint32_t tail_elements) {
+    CircularBuffer& input,
+    uint32_t acc_cb,
+    uint32_t indices_cb,
+    uint32_t row_first_chunk,
+    uint32_t num_chunks,
+    uint32_t tail_elements,
+    bool final_ascending,
+    bool emit_indices) {
     static_assert(K == 2048, "the segmented body is K = 2048's");
     constexpr uint32_t tiles_per_sequence = (K + elements_per_tile - 1) / elements_per_tile;
     constexpr uint32_t accumulator_tiles = 2 * tiles_per_sequence;
     constexpr uint32_t accumulator_slot = 0;
     constexpr uint32_t segment_slot = accumulator_tiles;
     constexpr uint32_t chunk_slot = segment_slot + tiles_per_sequence;
-    // A shorter last segment runs on one thread: the accumulator's two copies cost more than its split saves.
-    constexpr uint32_t min_split_later_chunks = 3;
+    // A one-chunk later segment is the only one that cannot run across the threads -- 33 and 65 chunk rows
+    // return wrong results if it does. Two-chunk ones used to take this path as well, on the grounds that the
+    // accumulator's two copies cost more than the split saves, but that kept a merge loop alive at both call
+    // sites and the kernel config buffer is the tighter constraint.
+    constexpr uint32_t min_split_later_chunks = 2;
     namespace stages = topk_large_indices_split_stages;
     const uint32_t input_cb = input.get_cb_id();
-    const uint32_t num_segments = (num_chunks + max_fused_chunks - 1) / max_fused_chunks;
+    const uint32_t end_chunk_total = row_first_chunk + num_chunks;
     CircularBuffer acc(acc_cb);
-    for (uint32_t segment = 0; segment < num_segments; ++segment) {
-        const uint32_t first_chunk = segment * max_fused_chunks;
-        const uint32_t seg_chunks =
-            num_chunks - first_chunk < max_fused_chunks ? num_chunks - first_chunk : max_fused_chunks;
-        const uint32_t seg_tail = first_chunk + seg_chunks == num_chunks ? tail_elements : K;
+    // Segments follow the row's 32-chunk blocks. The split body stamps chunks segment-locally and decodes with
+    // the block base, so a segment must start on a block boundary -- kernel_main only sends a half here when its
+    // first chunk is one.
+    uint32_t segment_first = row_first_chunk;
+    for (uint32_t segment = 0; segment_first < end_chunk_total; ++segment) {
+        const uint32_t block_end = (segment_first / max_fused_chunks + 1) * max_fused_chunks;
+        const uint32_t end_chunk = block_end < end_chunk_total ? block_end : end_chunk_total;
+        const uint32_t seg_chunks = end_chunk - segment_first;
+        const bool last_segment = end_chunk == end_chunk_total;
+        const uint32_t seg_tail = last_segment ? tail_elements : K;
+        const uint32_t block = segment_first / max_fused_chunks;
         const bool later = segment != 0;
         const bool split = !later || seg_chunks >= min_split_later_chunks;
+        // A later segment merges into the descending accumulator, so it ends ascending; the last one ends
+        // ascending when this core's survivor leaves for its partner.
+        const bool mirror = later || (last_segment && final_ascending);
 
         if (!split) {
-            sort_fused_chunk<K, true>(
-                input, segment_slot, seg_chunks == 1 ? seg_tail : K, false /*ascending*/, 0 /*local_chunk_id*/);
-            if (seg_chunks == 1) {
-                topk_xl_rebuild<K, true>(segment_slot, true /*ascending*/);
-            }
-            for (uint32_t chunk = 1; chunk < seg_chunks; ++chunk) {
-                sort_fused_chunk<K, false>(
-                    input, chunk_slot, chunk + 1 == seg_chunks ? seg_tail : K, true /*ascending*/, chunk);
-                topk_xl_merge<K, true>(segment_slot);
-                topk_xl_rebuild<K, true>(segment_slot, chunk + 1 == seg_chunks /*ascending*/);
-            }
+            // Reachable only at one chunk, so there is nothing to merge into it.
+            sort_fused_chunk<K, true>(input, segment_slot, seg_tail, false /*ascending*/, 0 /*local_chunk_id*/);
+            topk_xl_rebuild<K, true>(segment_slot, true /*ascending*/);
         } else {
             if (later) {
                 stages::spill_accumulator<K>(acc, segment);
             }
             stages::feed_segment<K>(input, seg_chunks, seg_tail);
             stages::math_segment<K>(input, seg_chunks, seg_tail);
-            stages::sfpu_segment<K>(seg_chunks, segment);
+            stages::sfpu_segment<K>(seg_chunks, later, block, mirror);
         }
 
         if (later) {
@@ -348,15 +359,19 @@ FORCE_INLINE void reduce_split_segmented_row(
             }
             if (!split) {
                 topk_xl_separate_indices_row_major_global_init();
-                topk_xl_separate_indices_row_major_global_base<K>(segment_slot, segment * (max_fused_chunks * K));
+                topk_xl_separate_indices_row_major_global_base<K>(segment_slot, block * (max_fused_chunks * K));
             }
             topk_xl_init<K, false>();
             topk_xl_merge<K, false>(accumulator_slot);
-            topk_xl_rebuild<K, false>(accumulator_slot, false /*ascending*/);
+            topk_xl_rebuild<K, false>(accumulator_slot, last_segment && final_ascending);
         }
+        segment_first = end_chunk;
     }
-    topk_large_indices_split_stages::mark_neginf_indices<K>(accumulator_slot);
-    materialize_index_rank_order<K>(accumulator_slot, indices_cb);
+    // A survivor that leaves this core is packed raw by the caller, so it skips the index epilogue.
+    if (emit_indices) {
+        topk_large_indices_split_stages::mark_neginf_indices<K>(accumulator_slot);
+        materialize_index_rank_order<K>(accumulator_slot, indices_cb);
+    }
 }
 
 // A raw pack and unpack round trip can leave unpacker state a later program's init does not reset; one discarded copy
@@ -457,17 +472,18 @@ void kernel_main() {
     CircularBuffer landing(landing_cb);
     CircularBuffer send(send_cb);
 
+    // The physical width decides which split body a program needs, so only that one is built. A shorter
+    // valid_length can still drop the row below a segment at runtime; the segmented body handles that as a
+    // single segment, it just cannot prefetch, which is why prefetch is off for these programs.
+    constexpr bool split_segments = K == 2048 && body_mode == ComputeBodyMode::FusedSegmented && acc_cb != 0;
+    constexpr bool segmented_split = split_segments && long_rows;
+    // Shorter rows run on one thread: the set-up costs more than the overlap saves.
+    constexpr uint32_t min_split_chunks = K == 2048 ? 2 : 3;
+
     const uint32_t num_whole_rows = has_split ? num_rows - 1 : num_rows;
     uint32_t first_row = 0;
     // Whole rows run split across MATH and PACK; a core's split half stays on one thread.
     if constexpr (split_whole_rows) {
-        // The physical width decides which split body a program needs, so only that one is built. A shorter
-        // valid_length can still drop the row below a segment at runtime; the segmented body handles that as a
-        // single segment, it just cannot prefetch, which is why prefetch is off for these programs.
-        constexpr bool split_segments = K == 2048 && body_mode == ComputeBodyMode::FusedSegmented && acc_cb != 0;
-        constexpr bool segmented_split = split_segments && long_rows;
-        // Shorter rows run on one thread: the set-up costs more than the overlap saves.
-        constexpr uint32_t min_split_chunks = K == 2048 ? 2 : 3;
         if (num_whole_rows > 0 && num_chunks >= min_split_chunks &&
             (num_chunks <= max_fused_chunks || split_segments)) {
             topk_large_indices_split_stages::begin_thread_split();
@@ -477,7 +493,15 @@ void kernel_main() {
                 const bool prefetch_next = prefetch && row + 1 < num_whole_rows;
                 tile_regs_acquire();
                 if constexpr (segmented_split) {
-                    reduce_split_segmented_row<K>(input, acc_cb, indices_cb, num_chunks, tail_elements);
+                    reduce_split_segmented_row<K>(
+                        input,
+                        acc_cb,
+                        indices_cb,
+                        0 /*row_first_chunk*/,
+                        num_chunks,
+                        tail_elements,
+                        false /*final_ascending*/,
+                        true /*emit_indices*/);
                 } else {
                     reduce_split_row<K>(
                         input, indices_cb, num_chunks, tail_elements, prefetch && row > 0, prefetch_next);
@@ -498,7 +522,6 @@ void kernel_main() {
                     tile_regs_release();
                 }
             }
-            topk_large_indices_split_stages::end_thread_split();
             if constexpr (segmented_split) {
                 settle_next_program(input_cb);
             }
@@ -520,7 +543,32 @@ void kernel_main() {
 
         tile_regs_acquire();
 
-        if constexpr (body_mode == ComputeBodyMode::FusedSegmented) {
+        // A half long enough, and starting on a 32-chunk block so the split body's segment-local stamps
+        // decode, runs across MATH and PACK like the whole rows do -- it was the last piece still on one
+        // thread, at 7.65 us per chunk against 6.20. The output below is shared with every other row.
+        bool half_on_both_threads = false;
+        if constexpr (segmented_split) {
+            if (split_row && row_chunks >= min_split_chunks && (first_chunk & (max_fused_chunks - 1)) == 0) {
+                topk_large_indices_split_stages::begin_thread_split();
+                reduce_split_segmented_row<K>(
+                    input,
+                    acc_cb,
+                    indices_cb,
+                    first_chunk,
+                    row_chunks,
+                    row_tail,
+                    row_sends /*final_ascending*/,
+                    false /*emit_indices*/);
+                topk_large_indices_split_stages::end_thread_split();
+                // The split body leaves the packer in its last segment's mode; both output forms below start
+                // from the untilize one.
+                pack_untilize_dest_init<tiles_per_sequence, tiles_per_sequence>(indices_cb);
+                half_on_both_threads = true;
+            }
+        }
+        if (half_on_both_threads) {
+            // already reduced
+        } else if constexpr (body_mode == ComputeBodyMode::FusedSegmented) {
             reduce_segmented_row<K>(input, first_chunk, row_chunks, row_tail, row_sends /*final_ascending*/);
         } else if constexpr (body_mode == ComputeBodyMode::FusedEndToEnd) {
             // The rebuild assembles its instructions from the direction, so each direction gets its own body.

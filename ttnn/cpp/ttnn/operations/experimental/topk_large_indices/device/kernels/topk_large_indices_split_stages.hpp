@@ -224,16 +224,17 @@ FORCE_INLINE void math_segment(CircularBuffer& input, uint32_t seg_chunks, uint3
 #endif
 }
 
-// PACK's share of one segment. A later segment ends ascending and moves its result clear of the accumulator.
+// PACK's share of one segment. `block` is the segment's 32-chunk block of the row, which decodes the
+// segment-local stamps; `mirror` ends the segment ascending, which a later segment needs for its unfused merge
+// and the last segment needs when the row's survivor leaves this core.
 template <uint32_t K>
-FORCE_INLINE void sfpu_segment(uint32_t seg_chunks, uint32_t segment) {
+FORCE_INLINE void sfpu_segment(uint32_t seg_chunks, bool later, uint32_t block, bool mirror) {
 #ifdef TRISC_PACK
     constexpr uint32_t accumulator_slot = 0;
-    const bool later = segment != 0;
-    auto epilogue = [segment, later] {
+    auto epilogue = [block, later] {
         ckernel::sfpu::_topk_xl_separate_indices_row_major_global_init_();
         ckernel::sfpu::_topk_xl_split_begin_(accumulator_slot);
-        ckernel::sfpu::_topk_xl_separate_indices_row_major_global_base_<K>(segment * (max_fused_chunks * K));
+        ckernel::sfpu::_topk_xl_separate_indices_row_major_global_base_<K>(block * (max_fused_chunks * K));
         TTI_SETRWC(ckernel::p_setrwc::CLR_NONE, 0, 0, 0, 0, ckernel::p_setrwc::SET_D);
         if (later) {
             ckernel::sfpu::_topk_xl_split_begin_(accumulator_slot);
@@ -241,7 +242,7 @@ FORCE_INLINE void sfpu_segment(uint32_t seg_chunks, uint32_t segment) {
             TTI_SETRWC(ckernel::p_setrwc::CLR_NONE, 0, 0, 0, 0, ckernel::p_setrwc::SET_D);
         }
     };
-    topk_large_indices_split::pack_row<K>(seg_chunks, later /*mirror_last*/, epilogue);
+    topk_large_indices_split::pack_row<K>(seg_chunks, mirror, epilogue);
 #endif
 }
 
