@@ -1624,12 +1624,18 @@ inline void transpose_8_faces()
     // 8 value faces at +0, +16, ..., +112, walked through RWC.Dst from one recording. The callers reach here
     // with RWC.Dst == 0; make that explicit rather than implicit, since a stale Dst corrupts silently.
     TTI_SETRWC(p_setrwc::CLR_NONE, 0, 0, 0, 0, p_setrwc::SET_D);
-    transpose_faces_from_dst<8>();
-    TTI_SETRWC(p_setrwc::CLR_NONE, 0, 0, 0, 0, p_setrwc::SET_D);
-    if constexpr (!fused)
+    if constexpr (!fused && indices_offset == 8 * 16)
     {
-        // Unfused mode keeps the indices in a parallel DST region. Transpose
-        // the 8 index faces so they match the (now-transposed) values.
+        // Unfused mode keeps the indices in a parallel DST region, and here it begins exactly where the eight
+        // value faces end, so one walk of sixteen faces covers both and the index faces cost only eight more
+        // replays instead of eight inlined bodies.
+        transpose_faces_from_dst<16>();
+    }
+    else if constexpr (!fused)
+    {
+        transpose_faces_from_dst<8>();
+        // The index region does not abut the value faces here, so these keep the absolute-offset form.
+        TTI_SETRWC(p_setrwc::CLR_NONE, 0, 0, 0, 0, p_setrwc::SET_D);
         transpose_dest_face_32b<indices_offset + 0>();
         transpose_dest_face_32b<indices_offset + 16>();
         transpose_dest_face_32b<indices_offset + 32>();
@@ -1639,6 +1645,11 @@ inline void transpose_8_faces()
         transpose_dest_face_32b<indices_offset + 96>();
         transpose_dest_face_32b<indices_offset + 112>();
     }
+    else
+    {
+        transpose_faces_from_dst<8>();
+    }
+    TTI_SETRWC(p_setrwc::CLR_NONE, 0, 0, 0, 0, p_setrwc::SET_D);
 
     if constexpr (manage_outer_cfg)
     {
