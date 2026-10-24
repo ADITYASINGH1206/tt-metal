@@ -1250,7 +1250,18 @@ def test_topk_large_indices_row_split_tail_chunk(device, k, n):
 
 
 @pytest.mark.parametrize("extra_rows", [1, 3])
-@pytest.mark.parametrize("k,n", [(1024, 32768 + 100), (2048, 65536)])
+@pytest.mark.parametrize(
+    "k,n",
+    [
+        (1024, 32768 + 100),
+        (2048, 65536),
+        # K' 2048 rows past one 32-chunk segment, with leftover rows to halve: the production indexer's program
+        # class (long_rows + row_split + split_whole_rows). Nothing else in this file builds it, and it is the
+        # largest kernel the op produces -- it overflowed the kernel config buffer under the watcher until the
+        # face transpose was recorded rather than inlined per face.
+        (2048, 34 * 2048),
+    ],
+)
 def test_topk_large_indices_leftover_rows_split(device, k, n, extra_rows):
     # Whole rows on every core, then the rows left over are halved across core pairs.
     grid = device.compute_with_storage_grid_size()
